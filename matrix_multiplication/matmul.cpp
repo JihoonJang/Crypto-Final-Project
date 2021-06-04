@@ -34,7 +34,10 @@ class PlainMatrix {
   void init_randomly() {
     for (int i = 0; i < n_; ++i) {
       for (int j = 0; j < n_; ++j) {
-        mat_[i][j] = rand() % 2;
+        if (i != j)
+          mat_[i][j] = rand() % 2;
+        else
+          mat_[i][j] = 0;
       }
     }
   }
@@ -100,6 +103,38 @@ class CipherMatrix {
           helib::multTwoNumbers(
               product_wrapper, helib::CtPtrs_vectorCt((*this)[i][k]),
               helib::CtPtrs_vectorCt(other[k][j]),
+              /*rhsTwosComplement=*/false,  // This means the rhs is unsigned
+                                            // rather than 2's complement.
+              outSize,  // Outsize is the limit on the number of bits in the
+                        // output.
+              &unpackSlotEncoding);  // Information needed for bootstrapping.
+          summands.push_back(encrypted_product);
+        }
+        std::vector<helib::Ctxt> encrypted_result;
+        helib::CtPtrs_vectorCt result_wrapper(encrypted_result);
+        helib::CtPtrMat_vectorCt summands_wrapper(summands);
+        helib::addManyNumbers(
+            result_wrapper, summands_wrapper,
+            0,  // sizeLimit=0 means use as many bits as needed.
+            &unpackSlotEncoding);  // Information needed for bootstrapping.
+        result[i][j] = std::move(encrypted_result);
+      }
+    }
+    return ret;
+  }
+
+  CipherMatrix square(CipherMatrix& result,
+                      std::vector<helib::zzX>& unpackSlotEncoding) {
+    CipherMatrix ret(n_);
+    for (size_t i = 0; i < n_; ++i) {
+      for (size_t j = 0; j < n_; ++j) {
+        std::vector<std::vector<helib::Ctxt>> summands;
+        for (size_t k = 0; k < n_; ++k) {
+          std::vector<helib::Ctxt> encrypted_product;
+          helib::CtPtrs_vectorCt product_wrapper(encrypted_product);
+          helib::multTwoNumbers(
+              product_wrapper, helib::CtPtrs_vectorCt((*this)[i][k]),
+              helib::CtPtrs_vectorCt((*this)[k][j]),
               /*rhsTwosComplement=*/false,  // This means the rhs is unsigned
                                             // rather than 2's complement.
               outSize,  // Outsize is the limit on the number of bits in the
@@ -227,23 +262,14 @@ int main(int argc, char* argv[]) {
   pm1.init_randomly();
   pm1.print();
 
-  PlainMatrix pm2(matrix_size);
-
-  pm2.init_randomly();
-  pm2.print();
-
   CipherMatrix cm1(matrix_size);
 
   cm1.encrypt(pm1, public_key, ea);
 
-  CipherMatrix cm2(matrix_size);
-
-  cm2.encrypt(pm2, public_key, ea);
-
-  CipherMatrix cm3(matrix_size);
+  CipherMatrix cm_res(matrix_size);
 
   clock_t start_time = clock();
-  cm1.multiply(cm3, cm2, unpackSlotEncoding);
+  cm1.square(cm_res, unpackSlotEncoding);
   clock_t end_time = clock();
 
   std::cout << "Matrix multiplication time : "
@@ -251,13 +277,13 @@ int main(int argc, char* argv[]) {
             << std::endl;
 
   start_time = clock();
-  PlainMatrix pm3 = cm3.decrypt(secret_key, ea);
+  PlainMatrix pm_res = cm_res.decrypt(secret_key, ea);
   end_time = clock();
 
   std::cout << "Matrix decryption time : "
             << (double)(end_time - start_time) / CLOCKS_PER_SEC << " sec"
             << std::endl;
-  pm3.print();
+  pm_res.print();
 
   return 0;
 }
